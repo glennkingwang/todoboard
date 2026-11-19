@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#263238">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="工作看板">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<title>工作看板</title>
+<style>
+  :root {
+    --bg: #eef1f5; --card: #fff; --ink: #222; --muted: #78909c; --line: #dde3e8;
+    --todo: #1565c0; --upcoming: #6a1b9a; --done: #2e7d32; --top: #263238;
+    --over-bg: #fde2e2; --over-fg: #b00020; --over-blink: #ff9e9e;
+    --today-bg: #ffecec; --today-fg: #c62828; --soon-bg: #fff3e0; --soon-fg: #e65100;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    background: var(--bg); color: var(--ink); font-size: 16px;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  button { font: inherit; border: 0; cursor: pointer; }
+  input, select, textarea { font: inherit; font-size: 16px; }
+  .hidden { display: none !important; }
+
+  /* 頂部 */
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--top); color: #fff;
+    padding: calc(env(safe-area-inset-top) + 10px) 14px 0;
+  }
+  .hrow { display: flex; align-items: center; gap: 8px; }
+  .htitle { font-size: 20px; font-weight: 700; }
+  .hdate { color: #b0bec5; font-size: 14px; }
+  .spacer { flex: 1; }
+  .ibtn { background: #37474f; color: #fff; border-radius: 10px; padding: 7px 11px; font-size: 15px; }
+  .ibtn:active { background: #546e7a; }
+  .ibtn.spin span { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .sync { font-size: 12px; color: #b0bec5; margin: 4px 0 0; min-height: 16px; }
+  .sync.err { color: #ff8a80; } .sync.warn { color: #ffcc80; }
+  .tabs { display: flex; margin: 8px -14px 0; }
+  .tab {
+    flex: 1; background: transparent; color: #b0bec5; padding: 10px 0 11px; font-size: 15px;
+    border-bottom: 3px solid transparent;
+  }
+  .tab.on { color: #fff; font-weight: 700; }
+  .tab.on[data-col=todo] { border-color: #64b5f6; }
+  .tab.on[data-col=upcoming] { border-color: #ce93d8; }
+  .tab.on[data-col=done] { border-color: #81c784; }
+
+  /* 列表 */
+  main { padding: 12px 12px 110px; }
+  .empty { text-align: center; color: var(--muted); padding: 50px 0; }
+  .card {
+    display: flex; align-items: center; gap: 10px; background: var(--card);
+    border-radius: 12px; padding: 12px 10px 12px 0; margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.06); overflow: hidden;
+  }
+  .bar { width: 5px; align-self: stretch; border-radius: 0 4px 4px 0; background: transparent; }
+  .body { flex: 1; min-width: 0; }
+  .ttl { font-size: 16px; word-break: break-word; }
+  .meta { font-size: 13px; color: var(--muted); margin-top: 3px; }
+  .card.overdue { background: var(--over-bg); animation: blink 1.4s steps(1) infinite; }
+  .card.overdue .bar { background: var(--over-fg); }
+  .card.overdue .ttl, .card.overdue .meta { color: var(--over-fg); }
+  @keyframes blink { 50% { background: var(--over-blink); } }
+  .card.today { background: var(--today-bg); } .card.today .bar { background: var(--today-fg); }
+  .card.today .ttl, .card.today .meta { color: var(--today-fg); }
+  .card.soon { background: var(--soon-bg); } .card.soon .bar { background: var(--soon-fg); }
+  .card.soon .ttl, .card.soon .meta { color: var(--soon-fg); }
+  .card.done .ttl { color: #8a8a8a; text-decoration: line-through; }
+  .card.pending .meta::after { content: " ・未上傳"; color: #ef6c00; }
+  .act {
+    width: 42px; height: 42px; border-radius: 50%; background: #eceff1; font-size: 18px;
+    flex-shrink: 0; color: #37474f;
+  }
+  .act:active { background: #cfd8dc; }
+  .fab {
+    position: fixed; right: 18px; bottom: calc(22px + env(safe-area-inset-bottom));
+    width: 60px; height: 60px; border-radius: 50%; background: var(--todo); color: #fff;
+    font-size: 32px; box-shadow: 0 4px 12px rgba(0,0,0,.25);
+  }
+  .legend { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; margin: 2px 0 10px; }
+  .legend span { padding: 2px 7px; border-radius: 6px; }
+
+  /* 底部表單 */
+  .mask { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 20; display: flex; align-items: flex-end; }
+  .sheet {
+    background: #fff; width: 100%; max-height: 92vh; overflow-y: auto; border-radius: 16px 16px 0 0;
+    padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+  .sheet h3 { margin: 0 0 12px; font-size: 18px; }
+  .sheet h4 { margin: 18px 0 8px; font-size: 15px; color: var(--todo); }
+  .fld { margin-bottom: 12px; }
+  .fld label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .fld input[type=text], .fld input[type=email], .fld input[type=password], .fld input[type=date],
+  .fld input[type=time], .fld input[type=number], .fld select, .fld textarea {
+    width: 100%; padding: 10px; border: 1px solid #cfd8dc; border-radius: 10px; background: #fff;
+    -webkit-appearance: none; appearance: none; min-height: 44px;
+  }
+  .fld textarea { min-height: 70px; resize: vertical; }
+  .seg { display: flex; border: 1px solid #cfd8dc; border-radius: 10px; overflow: hidden; }
+  .seg button { flex: 1; padding: 10px 0; background: #fff; color: #37474f; }
+  .seg button.on { color: #fff; }
+  .seg button.on[data-v=todo] { background: var(--todo); }
+  .seg button.on[data-v=upcoming] { background: var(--upcoming); }
+  .seg button.on[data-v=done] { background: var(--done); }
+  .chips { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .chips button { background: #eceff1; border-radius: 16px; padding: 6px 12px; font-size: 14px; }
+  .row2 { display: flex; gap: 10px; } .row2 > * { flex: 1; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .btns { display: flex; gap: 10px; margin-top: 16px; }
+  .btn { flex: 1; padding: 13px 0; border-radius: 12px; background: #eceff1; color: #37474f; font-size: 16px; }
+  .btn.primary { background: var(--todo); color: #fff; font-weight: 700; }
+  .btn.danger { background: #ffebee; color: #c62828; }
+  .switch { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+  .switch input { width: 22px; height: 22px; }
+
+  /* 登入 */
+  .login { max-width: 380px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 60px) 24px 24px; }
+  .login h1 { font-size: 26px; margin: 0 0 6px; }
+  .login p { color: var(--muted); margin: 0 0 24px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: rgba(38,50,56,.95); color: #fff; padding: 10px 16px; border-radius: 20px; font-size: 14px;
+    z-index: 50; max-width: 88vw; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<!-- 登入畫面 -->
+<section id="loginView" class="login hidden">
+  <h1>📋 工作看板</h1>
+  <p>登入後與電腦看板同步</p>
+  <div class="fld"><label>Email</label><input id="lgEmail" type="email" autocomplete="username"></div>
+  <div class="fld"><label>密碼</label><input id="lgPw" type="password" autocomplete="current-password"></div>
+  <div class="btns"><button class="btn primary" id="lgBtn">登入</button></div>
+</section>
+
+<!-- 主畫面 -->
+<section id="mainView" class="hidden">
+  <header>
+    <div class="hrow">
+      <span class="htitle">工作計畫</span><span class="hdate" id="today"></span>
+      <span class="spacer"></span>
+      <button class="ibtn" id="syncBtn"><span>🔄</span> 同步</button>
+      <button class="ibtn" id="setBtn">⚙</button>
+    </div>
+    <div class="sync" id="syncStatus"></div>
+    <div class="tabs">
+      <button class="tab on" data-col="todo">待完成</button>
+      <button class="tab" data-col="upcoming">即將到來</button>
+      <button class="tab" data-col="done">已完成</button>
+    </div>
+  </header>
+  <main>
+    <div class="legend" id="legend"></div>
+    <div id="list"></div>
+  </main>
+  <button class="fab" id="addBtn">＋</button>
+</section>
+
+<!-- 編輯 -->
+<div class="mask hidden" id="editMask">
+  <div class="sheet">
+    <h3 id="edTitle">新增項目</h3>
+    <div class="fld"><label>項目</label><input id="edName" type="text" placeholder="要做什麼？"></div>
+    <div class="fld"><label>放在</label>
+      <div class="seg" id="edCol">
+        <button data-v="todo">待完成</button><button data-v="upcoming">即將到來</button><button data-v="done">已完成</button>
+      </div>
+    </div>
+    <div class="fld"><label>日期</label><input id="edDate" type="date">
+      <div class="chips">
+        <button data-d="0">今天</button><button data-d="1">明天</button><button data-d="mon">下週一</button><button data-d="">清除</button>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="fld"><label>時間（選填）</label><input id="edTime" type="time"></div>
+      <div class="fld"><label>提前提醒</label>
+        <select id="edRem">
+          <option value="">預設</option><option value="0">到期時</option><option value="5">5 分鐘</option>
+          <option value="10">10 分鐘</option><option value="15">15 分鐘</option><option value="30">30 分鐘</option>
+          <option value="60">1 小時</option><option value="120">2 小時</option><option value="1440">1 天</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint" id="edHint"></div>
+    <div class="fld" style="margin-top:12px"><label>備註</label><textarea id="edNote"></textarea></div>
+    <div class="btns">
+      <button class="btn danger hidden" id="edDel">刪除</button>
+      <button class="btn" id="edCancel">取消</button>
+      <button class="btn primary" id="edSave">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 設定 -->
+<div class="mask hidden" id="setMask">
+  <div class="sheet">
+    <h3>設定</h3>
+    <div class="hint" id="stAcct"></div>
+
+    <h4>Telegram 推播（雲端發送，電腦關機也會提醒）</h4>
+    <label class="switch">啟用 Telegram <input type="checkbox" id="stTgOn"></label>
+    <div class="fld"><label>Bot Token</label><input id="stToken" type="password" autocomplete="off"></div>
+    <div class="fld"><label>Chat ID</label><input id="stChat" type="text" inputmode="numeric" autocomplete="off">
+      <div class="hint">Chat ID 取得方式：在電腦看板的設定按「自動取得 Chat ID」最方便；或在 Telegram 找 @userinfobot 傳訊息，它會回覆你的 ID。</div>
+    </div>
+
+    <h4>提醒規則（手機和電腦共用）</h4>
+    <div class="row2">
+      <div class="fld"><label>預設提前提醒（分鐘）</label><input id="stRem" type="number" min="0"></div>
+      <div class="fld"><label>只有日期的提醒時間</label><input id="stDayT" type="time"></div>
+    </div>
+    <label class="switch">每天發送今日摘要 <input type="checkbox" id="stSumOn"></label>
+    <div class="row2">
+      <div class="fld"><label>摘要時間</label><input id="stSumT" type="time"></div>
+      <div class="fld"><label>「即將到期」天數</label><input id="stSoon" type="number" min="1"></div>
+    </div>
+
+    <div class="btns">
+      <button class="btn" id="stTest">儲存並測試</button>
+      <button class="btn primary" id="stSave">儲存</button>
+    </div>
+    <div class="btns">
+      <button class="btn danger" id="stLogout">登出</button>
+      <button class="btn" id="stClose">關閉</button>
+    </div>
+    <div class="hint" style="text-align:center;margin-top:12px">工作看板 手機版 v2.0</div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script>
+"use strict";
+const SUPABASE_URL = "https://uyxnohyfrzwceasfxuch.supabase.co";
+const SUPABASE_KEY = "sb_publishable_UakNDySIJYGx4lsOPBNHCg_BNmN7SIl";  // 公開金鑰
+const SYNC_MINUTES = 30;
+const COLS = { todo: "待完成", upcoming: "即將到來", done: "已完成" };
+const WEEK = "日一二三四五六";
+
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+
+let session = store.get("tb_session", null);       // {access, refresh, exp, email, uid}
+let items = store.get("tb_items", []);             // 雲端資料的本機快取
+let pending = store.get("tb_pending", {});         // 尚未上傳的修改 {id: row}
+let settings = store.get("tb_settings", { default_remind_minutes: 30, date_only_remind_time: "09:00",
+                                          daily_summary_enabled: true, daily_summary_time: "08:30", soon_days: 3 });
+let lastSync = store.get("tb_last_sync", "");
+let curCol = "todo";
+let syncing = false;
+
+// ---------------------------------------------------------------- 工具
+function toast(msg, ms = 2400) {
+  const t = $("toast"); t.textContent = msg; t.classList.remove("hidden");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), ms);
+}
+function pad(n) { return String(n).padStart(2, "0"); }
+function ymd(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function parseYmd(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
+function todayStr() { return ymd(new Date()); }
+function nowIso() { return new Date().toISOString(); }
+function uid() {
+  if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, "");
+  return Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function fmtDue(it) {
+  if (!it.due_date) return "";
+  const d = parseYmd(it.due_date);
+  let s = `${d.getMonth() + 1}/${d.getDate()}(${WEEK[d.getDay()]})`;
+  if (d.getFullYear() !== new Date().getFullYear()) s = `${d.getFullYear()}/` + s;
+  if (it.due_time) s += " " + it.due_time;
+  return s;
+}
+function status(it) {
+  if (it.col === "done") return "done";
+  if (!it.due_date) return "normal";
+  const now = new Date(), t = todayStr();
+  if (it.due_date < t) return "overdue";
+  if (it.due_time && new Date(`${it.due_date}T${it.due_time}:00`) < now) return "overdue";
+  if (it.due_date === t) return "today";
+  const days = Math.round((parseYmd(it.due_date) - parseYmd(t)) / 86400000);
+  return days <= (settings.soon_days || 3) ? "soon" : "normal";
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+// ---------------------------------------------------------------- 雲端
+class ApiError extends Error {}
+async function http(method, path, body, extraHeaders = {}, auth = true) {
+  const h = { apikey: SUPABASE_KEY, "Content-Type": "application/json", ...extraHeaders };
+  if (auth) h.Authorization = "Bearer " + (await token());
+  let res;
+  try {
+    res = await fetch(SUPABASE_URL + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch (e) { throw new ApiError("無法連線雲端，請檢查網路"); }
+  const txt = await res.text();
+  let j = null; try { j = txt ? JSON.parse(txt) : null; } catch (e) {}
+  if (!res.ok) {
+    const msg = (j && (j.msg || j.message || j.error_description || j.error)) || txt || res.status;
+    const err = new ApiError(String(msg)); err.status = res.status; throw err;
+  }
+  return j;
+}
+function storeSession(r) {
+  session = { access: r.access_token, refresh: r.refresh_token, exp: Date.now() + (r.expires_in - 60) * 1000,
+              email: (r.user && r.user.email) || (session && session.email) || "",
+              uid: (r.user && r.user.id) || (session && session.uid) || "" };
+  store.set("tb_session", session);
+}
+let refreshing = null;
+async function token() {
+  if (!session) throw new ApiError("尚未登入");
+  if (session.access && Date.now() < session.exp) return session.access;
+  if (!refreshing) {
+    refreshing = (async () => {
+      try {
+        const r = await http("POST", "/auth/v1/token?grant_type=refresh_token", { refresh_token: session.refresh }, {}, false);
+        storeSession(r);
+      } catch (e) {
+        if (e.status === 400 || e.status === 401) { logoutLocal(); throw new ApiError("登入已過期，請重新登入"); }
+        throw e;
+      } finally { refreshing = null; }
+    })();
+  }
+  await refreshing;
+  return session.access;
+}
+async function login(email, pw) {
+  const r = await http("POST", "/auth/v1/token?grant_type=password", { email, password: pw }, {}, false);
+  if (session && session.uid && r.user && r.user.id !== session.uid) { items = []; pending = {}; }
+  storeSession(r);
+  store.set("tb_items", items); store.set("tb_pending", pending);
+}
+function logoutLocal() {
+  session = null; items = []; pending = {};
+  ["tb_session", "tb_items", "tb_pending", "tb_last_sync"].forEach(store.del);
+  show();
+}
+
+// ---------------------------------------------------------------- 同步
+async function flushPending() {
+  const rows = Object.values(pending);
+  if (!rows.length) return;
+  for (let i = 0; i < rows.length; i += 200) {
+    await http("POST", "/rest/v1/todos?on_conflict=id", rows.slice(i, i + 200),
+               { Prefer: "resolution=merge-duplicates,return=minimal" });
+  }
+  for (const r of rows) {
+    if (pending[r.id] && pending[r.id].updated_at === r.updated_at) delete pending[r.id];
+  }
+  store.set("tb_pending", pending);
+}
+async function sync(manual = false) {
+  if (!session || syncing) return;
+  syncing = true; $("syncBtn").classList.add("spin"); setStatus("同步中…");
+  try {
+    await flushPending();
+    const rows = await http("GET", "/rest/v1/todos?select=*&deleted=eq.false&order=due_date.asc,due_time.asc&limit=5000");
+    items = rows;
+    for (const id in pending) {           // 同步期間又改的，以本機為準
+      const p = pending[id], i = items.findIndex((x) => x.id === id);
+      if (p.deleted) { if (i >= 0) items.splice(i, 1); }
+      else if (i >= 0) items[i] = { ...items[i], ...p }; else items.push(p);
+    }
+    const s = await http("GET", "/rest/v1/user_settings?select=*");
+    if (s && s[0]) { settings = s[0]; store.set("tb_settings", settings); }
+    store.set("tb_items", items);
+    lastSync = new Date().toISOString(); store.set("tb_last_sync", lastSync);
+    autoPromote();
+    setStatus();
+    if (manual) toast("已同步 ✅");
+  } catch (e) {
+    setStatus("⚠ 同步失敗：" + e.message, "err");
+    if (manual) toast("同步失敗：" + e.message, 3500);
+  } finally {
+    syncing = false; $("syncBtn").classList.remove("spin"); render();
+  }
+}
+function autoPromote() {
+  const t = todayStr();
+  items.filter((it) => it.col === "upcoming" && it.due_date && it.due_date <= t)
+       .forEach((it) => save({ ...it, col: "todo" }, true));
+}
+function setStatus(text, cls = "") {
+  const el = $("syncStatus");
+  if (text === undefined) {
+    const n = Object.keys(pending).length;
+    if (lastSync) { const d = new Date(lastSync); text = `☁ 已同步 ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+    else text = "☁ 尚未同步";
+    if (n) { text += `（${n} 筆待上傳）`; cls = "warn"; }
+  }
+  el.textContent = text; el.className = "sync " + cls;
+}
+
+// 修改：立刻顯示、存進待上傳，再嘗試上傳
+function toRow(it) {
+  return {
+    id: it.id, title: it.title, col: it.col, due_date: it.due_date || "", due_time: it.due_time || "",
+    remind_min: it.remind_min === "" || it.remind_min === undefined ? null : it.remind_min,
+    note: it.note || "", created_at: it.created_at || nowIso(), done_at: it.done_at || null,
+    updated_at: nowIso(), deleted: !!it.deleted,
+  };
+}
+function save(it, quiet = false) {
+  const row = toRow(it);
+  pending[row.id] = row; store.set("tb_pending", pending);
+  const i = items.findIndex((x) => x.id === row.id);
+  if (row.deleted) { if (i >= 0) items.splice(i, 1); }
+  else if (i >= 0) items[i] = { ...items[i], ...row }; else items.push(row);
+  store.set("tb_items", items);
+  render(); setStatus();
+  flushPending().then(() => { setStatus(); render(); }).catch((e) => {
+    setStatus("⚠ 尚未上傳（" + e.message + "）", "warn");
+    if (!quiet) toast("已存在手機，連上網路後會自動上傳");
+  });
+}
+
+// ---------------------------------------------------------------- 畫面
+function show() {
+  $("loginView").classList.toggle("hidden", !!session);
+  $("mainView").classList.toggle("hidden", !session);
+  if (session) { render(); setStatus(); }
+}
+function sorted(col) {
+  const list = items.filter((it) => it.col === col && !it.deleted);
+  if (col === "done") return list.sort((a, b) => String(b.done_at || "").localeCompare(String(a.done_at || ""))).slice(0, 200);
+  return list.sort((a, b) =>
+    ((a.due_date ? 0 : 1) - (b.due_date ? 0 : 1)) ||
+    String(a.due_date || "9999").localeCompare(String(b.due_date || "9999")) ||
+    String(a.due_time || "99").localeCompare(String(b.due_time || "99")) ||
+    String(a.created_at || "").localeCompare(String(b.created_at || "")));
+}
+function render() {
+  const d = new Date();
+  $("today").textContent = `${d.getMonth() + 1}/${d.getDate()}（${WEEK[d.getDay()]}）`;
+  document.querySelectorAll(".tab").forEach((t) => {
+    const c = t.dataset.col, n = items.filter((it) => it.col === c && !it.deleted).length;
+    t.textContent = `${COLS[c]}（${n}）`; t.classList.toggle("on", c === curCol);
+  });
+  $("legend").innerHTML = curCol === "done" ? "" :
+    `<span style="background:var(--over-bg);color:var(--over-fg)">⚠ 已逾期</span>` +
+    `<span style="background:var(--today-bg);color:var(--today-fg)">● 今天</span>` +
+    `<span style="background:var(--soon-bg);color:var(--soon-fg)">◆ ${settings.soon_days || 3} 天內</span>`;
+  const list = sorted(curCol);
+  if (!list.length) { $("list").innerHTML = `<div class="empty">這裡沒有項目</div>`; return; }
+  $("list").innerHTML = list.map((it) => {
+    const st = status(it);
+    let meta = fmtDue(it);
+    if (it.col === "done" && it.done_at) { const dd = new Date(it.done_at); meta = `${dd.getMonth() + 1}/${dd.getDate()} 完成`; }
+    if (it.note) meta += (meta ? "　" : "") + "📝 " + it.note.split("\n")[0].slice(0, 30);
+    const actIcon = it.col === "done" ? "↩" : "✔";
+    return `<div class="card ${st} ${pending[it.id] ? "pending" : ""}" data-id="${esc(it.id)}">
+      <div class="bar"></div>
+      <div class="body"><div class="ttl">${esc(it.title)}</div>${meta ? `<div class="meta">${esc(meta)}</div>` : `<div class="meta"></div>`}</div>
+      <button class="act" data-act="${esc(it.id)}" aria-label="${it.col === "done" ? "重新開啟" : "完成"}">${actIcon}</button>
+    </div>`;
+  }).join("");
+}
+
+// ---------------------------------------------------------------- 編輯
+let editing = null;
+function setSeg(v) { document.querySelectorAll("#edCol button").forEach((b) => b.classList.toggle("on", b.dataset.v === v)); }
+function getSeg() { const b = document.querySelector("#edCol button.on"); return b ? b.dataset.v : "todo"; }
+function updateHint() {
+  const t = $("edTime").value;
+  $("edHint").textContent = t ? `到期前依「提前提醒」通知一次，到期時再通知一次。`
+                              : `沒填時間時，當天 ${settings.date_only_remind_time || "09:00"} 提醒。`;
+}
+function openEditor(it) {
+  editing = it;
+  $("edTitle").textContent = it ? "編輯項目" : "新增項目";
+  $("edName").value = it ? it.title : "";
+  setSeg(it ? it.col : curCol);
+  $("edDate").value = it ? it.due_date || "" : "";
+  $("edTime").value = it ? it.due_time || "" : "";
+  $("edRem").value = it && it.remind_min !== null && it.remind_min !== undefined ? String(it.remind_min) : "";
+  if (it && $("edRem").value !== String(it.remind_min ?? "")) {   // 不在選單裡的分鐘數
+    const o = document.createElement("option"); o.value = String(it.remind_min); o.textContent = `${it.remind_min} 分鐘`;
+    $("edRem").appendChild(o); $("edRem").value = String(it.remind_min);
+  }
+  $("edNote").value = it ? it.note || "" : "";
+  $("edDel").classList.toggle("hidden", !it);
+  updateHint();
+  $("editMask").classList.remove("hidden");
+  if (!it) setTimeout(() => $("edName").focus(), 150);
+}
+function closeEditor() { $("editMask").classList.add("hidden"); editing = null; }
+function saveEditor() {
+  const title = $("edName").value.trim();
+  if (!title) { toast("請輸入項目名稱"); return; }
+  const date = $("edDate").value, time = $("edTime").value;
+  if (time && !date) { toast("有填時間時，請一併填日期"); return; }
+  let col = getSeg();
+  const t = todayStr();
+  if (col === "upcoming" && date && date <= t) col = "todo";
+  const base = editing ? { ...editing } : { id: uid(), created_at: nowIso() };
+  const remRaw = $("edRem").value;
+  const it = { ...base, title, col, due_date: date, due_time: time, note: $("edNote").value.trim(),
+               remind_min: remRaw === "" ? null : Number(remRaw) };
+  if (!editing || editing.col !== col) it.done_at = col === "done" ? nowIso() : null;
+  save(it);
+  if (!editing && col !== curCol) toast(`已新增到「${COLS[col]}」`);
+  closeEditor();
+}
+
+// ---------------------------------------------------------------- 設定
+function openSettings() {
+  $("stAcct").textContent = `已登入：${session.email}`;
+  const s = settings;
+  $("stTgOn").checked = !!s.tg_enabled;
+  $("stToken").value = s.tg_bot_token || "";
+  $("stChat").value = s.tg_chat_id || "";
+  $("stRem").value = s.default_remind_minutes ?? 30;
+  $("stDayT").value = s.date_only_remind_time || "09:00";
+  $("stSumOn").checked = s.daily_summary_enabled !== false;
+  $("stSumT").value = s.daily_summary_time || "08:30";
+  $("stSoon").value = s.soon_days ?? 3;
+  $("setMask").classList.remove("hidden");
+}
+async function saveSettings() {
+  const d = {
+    tg_enabled: $("stTgOn").checked, tg_bot_token: $("stToken").value.trim(), tg_chat_id: $("stChat").value.trim(),
+    default_remind_minutes: Math.max(0, parseInt($("stRem").value || "30", 10)),
+    date_only_remind_time: $("stDayT").value || "09:00",
+    daily_summary_enabled: $("stSumOn").checked, daily_summary_time: $("stSumT").value || "08:30",
+    soon_days: Math.max(1, parseInt($("stSoon").value || "3", 10)), updated_at: nowIso(),
+  };
+  await http("POST", "/rest/v1/user_settings?on_conflict=user_id", d, { Prefer: "resolution=merge-duplicates,return=minimal" });
+  settings = { ...settings, ...d }; store.set("tb_settings", settings);
+  render();
+}
+async function testTelegram() {
+  await saveSettings();
+  if (!settings.tg_enabled) { toast("已儲存。Telegram 尚未啟用"); return; }
+  const r = await http("POST", "/rest/v1/rpc/tg_test", {});
+  if (r !== "sent") { toast(r, 3500); return; }
+  toast("發送中…");
+  for (let i = 0; i < 8; i++) {
+    await new Promise((ok) => setTimeout(ok, 1500));
+    const res = await http("POST", "/rest/v1/rpc/tg_test_result", {});
+    if (res === "ok") { toast("Telegram 已送出 ✅ 請看訊息", 3500); return; }
+    if (res !== "pending" && res !== "none") { toast("發送失敗：" + res, 5000); return; }
+  }
+  toast("已排入發送，若一分鐘內沒收到請檢查 Token / Chat ID", 4500);
+}
+
+// ---------------------------------------------------------------- 事件
+$("lgBtn").onclick = async () => {
+  const e = $("lgEmail").value.trim(), p = $("lgPw").value;
+  if (!e || !p) { toast("請輸入 Email 和密碼"); return; }
+  $("lgBtn").disabled = true; $("lgBtn").textContent = "登入中…";
+  try { await login(e, p); $("lgPw").value = ""; show(); sync(); }
+  catch (err) { toast(/invalid/i.test(err.message) ? "Email 或密碼錯誤" : "登入失敗：" + err.message, 3500); }
+  finally { $("lgBtn").disabled = false; $("lgBtn").textContent = "登入"; }
+};
+$("lgPw").addEventListener("keydown", (e) => { if (e.key === "Enter") $("lgBtn").click(); });
+$("syncBtn").onclick = () => sync(true);
+$("addBtn").onclick = () => openEditor(null);
+$("setBtn").onclick = openSettings;
+document.querySelectorAll(".tab").forEach((t) => t.onclick = () => { curCol = t.dataset.col; render(); window.scrollTo(0, 0); });
+$("list").onclick = (e) => {
+  const act = e.target.closest("[data-act]");
+  if (act) {
+    const it = items.find((x) => x.id === act.dataset.act); if (!it) return;
+    if (it.col === "done") { save({ ...it, col: "todo", done_at: null }); toast("已移回待完成"); }
+    else { save({ ...it, col: "done", done_at: nowIso() }); toast(`完成：${it.title} 🎉`); }
+    return;
+  }
+  const card = e.target.closest(".card");
+  if (card) openEditor(items.find((x) => x.id === card.dataset.id));
+};
+document.querySelectorAll("#edCol button").forEach((b) => b.onclick = () => setSeg(b.dataset.v));
+document.querySelectorAll(".chips button").forEach((b) => b.onclick = () => {
+  const v = b.dataset.d, d = new Date();
+  if (v === "") { $("edDate").value = ""; return; }
+  if (v === "mon") d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7)); else d.setDate(d.getDate() + Number(v));
+  $("edDate").value = ymd(d);
+  if (ymd(d) > todayStr() && getSeg() === "todo" && !editing) setSeg("upcoming");
+  if (ymd(d) <= todayStr() && getSeg() === "upcoming") setSeg("todo");
+});
+$("edTime").onchange = updateHint;
+$("edCancel").onclick = closeEditor;
+$("edSave").onclick = saveEditor;
+$("edDel").onclick = () => {
+  if (!editing || !confirm(`刪除「${editing.title}」？`)) return;
+  save({ ...editing, deleted: true }); toast("已刪除"); closeEditor();
+};
+$("editMask").onclick = (e) => { if (e.target === $("editMask")) closeEditor(); };
+$("setMask").onclick = (e) => { if (e.target === $("setMask")) $("setMask").classList.add("hidden"); };
+$("stClose").onclick = () => $("setMask").classList.add("hidden");
+$("stSave").onclick = async () => {
+  try { await saveSettings(); toast("已儲存 ✅"); $("setMask").classList.add("hidden"); }
+  catch (e) { toast("儲存失敗：" + e.message, 3500); }
+};
+$("stTest").onclick = async () => { try { await testTelegram(); } catch (e) { toast("失敗：" + e.message, 4000); } };
+$("stLogout").onclick = async () => {
+  if (Object.keys(pending).length && !confirm("還有修改尚未上傳，登出會遺失。確定登出？")) return;
+  if (!confirm("確定登出？")) return;
+  try { await http("POST", "/auth/v1/logout", {}); } catch (e) {}
+  $("setMask").classList.add("hidden"); logoutLocal();
+};
+
+// 回到 App、網路恢復時同步；另每 30 分鐘背景同步
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && session) {
+    render();
+    if (!lastSync || Date.now() - new Date(lastSync) > 60000) sync();
+  }
+});
+window.addEventListener("online", () => session && sync());
+setInterval(() => { if (session && document.visibilityState === "visible") sync(); }, SYNC_MINUTES * 60000);
+setInterval(() => { if (session) render(); }, 60000);   // 每分鐘更新顏色（逾期／今天）
+
+show();
+if (session) sync();
+</script>
+</body>
+</html>
