@@ -6,6 +6,8 @@
 
 ## 功能
 
+- 清單切換：**全部**／💼 **工作**（私人）／🏠 **家庭**（與家人共用），可自訂新清單
+- 共用清單可指定**負責人**，Telegram 只通知負責的人（未指定則通知所有成員）
 - 三個分頁：**待完成**／**即將到來**／**已完成**
 - 新增、編輯、刪除、標記完成；可設定日期、時間、提前提醒分鐘數與備註
 - 顏色提示：⚠ 已逾期（紅色閃爍）、● 今天（紅）、◆ 3 天內（橘）
@@ -25,10 +27,10 @@
 
 | 元件 | 說明 |
 |---|---|
-| 資料庫 | Supabase Postgres：`todos`（待辦）、`user_settings`（個人設定） |
-| 權限 | Row Level Security：每個帳號只能讀寫自己的資料 |
+| 資料庫 | Supabase Postgres：`todos`（待辦）、`lists`／`list_members`（清單與成員）、`user_settings`（個人設定） |
+| 權限 | Row Level Security：只有清單成員能讀寫該清單的項目 |
 | 同步規則 | 以 `updated_at` 最後修改者為準；刪除先標記 `deleted` |
-| 雲端提醒 | `pg_cron` + `pg_net`，每分鐘執行 `todo_reminders()`，用各帳號自己的 Telegram Bot 發送 |
+| 雲端提醒 | `pg_cron` + `pg_net`，每分鐘執行 `todo_reminders()`，依負責人用各自的 Telegram Bot 發送 |
 
 ## Telegram 提醒時段
 

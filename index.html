@@ -45,6 +45,13 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .sync { font-size: 12px; color: #b0bec5; margin: 4px 0 0; min-height: 16px; }
   .sync.err { color: #ff8a80; } .sync.warn { color: #ffcc80; }
+  .views { display: flex; gap: 6px; overflow-x: auto; margin: 8px -14px 0; padding: 0 14px; scrollbar-width: none; }
+  .views::-webkit-scrollbar { display: none; }
+  .view { flex-shrink: 0; background: #37474f; color: #fff; border-radius: 16px; padding: 5px 12px; font-size: 14px; }
+  .view.on { background: #eceff1; color: #263238; font-weight: 700; }
+  .lrow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .lrow .ln { font-weight: 700; } .lrow .lm { flex: 1; font-size: 13px; color: var(--muted); }
+  .sbtn { background: #eceff1; border-radius: 8px; padding: 6px 10px; font-size: 14px; }
   .tabs { display: flex; margin: 8px -14px 0; }
   .tab {
     flex: 1; background: transparent; color: #b0bec5; padding: 10px 0 11px; font-size: 15px;
@@ -156,6 +163,7 @@
       <button class="ibtn" id="setBtn">⚙</button>
     </div>
     <div class="sync" id="syncStatus"></div>
+    <div class="views" id="views"></div>
     <div class="tabs">
       <button class="tab on" data-col="todo">待完成</button>
       <button class="tab" data-col="upcoming">即將到來</button>
@@ -178,6 +186,10 @@
       <div class="seg" id="edCol">
         <button data-v="todo">待完成</button><button data-v="upcoming">即將到來</button><button data-v="done">已完成</button>
       </div>
+    </div>
+    <div class="row2" id="edListRow">
+      <div class="fld"><label>清單</label><select id="edList"></select></div>
+      <div class="fld"><label>負責人</label><select id="edWho"></select></div>
     </div>
     <div class="fld"><label>日期</label><input id="edDate" type="date">
       <div class="chips">
@@ -209,6 +221,16 @@
   <div class="sheet">
     <h3>設定</h3>
     <div class="hint" id="stAcct"></div>
+    <div class="fld" style="margin-top:8px"><label>我的稱呼（家人看到的名字，例如「老公」）</label><input id="stNick" type="text"></div>
+
+    <h4>清單</h4>
+    <div id="stLists"></div>
+    <div class="row2" style="margin-top:8px">
+      <div class="fld" style="flex:0 0 70px"><label>圖示</label><input id="nlIcon" type="text" value="📋"></div>
+      <div class="fld"><label>新增清單名稱</label><input id="nlName" type="text" placeholder="例如：小孩學校"></div>
+    </div>
+    <button class="sbtn" id="nlBtn">＋ 新增清單</button>
+    <div class="hint">邀請成員前，對方帳號要先在 Supabase → Authentication → Users 建立。</div>
 
     <h4>Telegram 推播（雲端發送，電腦關機也會提醒）</h4>
     <label class="switch">啟用 Telegram <input type="checkbox" id="stTgOn"></label>
@@ -236,7 +258,7 @@
       <button class="btn danger" id="stLogout">登出</button>
       <button class="btn" id="stClose">關閉</button>
     </div>
-    <div class="hint" style="text-align:center;margin-top:12px">工作看板 手機版 v2.0</div>
+    <div class="hint" style="text-align:center;margin-top:12px">工作看板 手機版 v3.0</div>
   </div>
 </div>
 
@@ -263,6 +285,8 @@ let pending = store.get("tb_pending", {});         // 尚未上傳的修改 {id:
 let settings = store.get("tb_settings", { default_remind_minutes: 30, date_only_remind_time: "09:00",
                                           daily_summary_enabled: true, daily_summary_time: "08:30", soon_days: 3 });
 let lastSync = store.get("tb_last_sync", "");
+let lists = store.get("tb_lists", []);              // [{id,name,icon,owner,shared,members:[{user_id,nickname,is_me}]}]
+let view = store.get("tb_view", "all");
 let curCol = "todo";
 let syncing = false;
 
@@ -297,6 +321,24 @@ function status(it) {
   if (it.due_date === t) return "today";
   const days = Math.round((parseYmd(it.due_date) - parseYmd(t)) / 86400000);
   return days <= (settings.soon_days || 3) ? "soon" : "normal";
+}
+function listById(id) { return lists.find((l) => l.id === id); }
+function defaultListId() {
+  const own = lists.filter((l) => l.owner === (session && session.uid) && !l.shared);
+  return own.length ? own[0].id : (lists[0] && lists[0].id) || null;
+}
+function nickOf(listId, uid) {
+  const l = listById(listId); const m = l && (l.members || []).find((x) => x.user_id === uid);
+  return m ? (m.is_me ? "我" : m.nickname) : "?";
+}
+function inView(it) { return view === "all" || it.list_id === view; }
+async function loadLists() {
+  await http("POST", "/rest/v1/rpc/ensure_default_lists", {});
+  const ls = await http("GET", "/rest/v1/lists?select=*&order=sort.asc,created_at.asc") || [];
+  const people = await http("POST", "/rest/v1/rpc/list_people", {}) || [];
+  lists = ls.map((l) => ({ ...l, members: people.filter((p) => p.list_id === l.id) }));
+  store.set("tb_lists", lists);
+  if (view !== "all" && !listById(view)) { view = "all"; store.set("tb_view", view); }
 }
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
@@ -343,13 +385,14 @@ async function token() {
 }
 async function login(email, pw) {
   const r = await http("POST", "/auth/v1/token?grant_type=password", { email, password: pw }, {}, false);
-  if (session && session.uid && r.user && r.user.id !== session.uid) { items = []; pending = {}; }
+  if (session && session.uid && r.user && r.user.id !== session.uid) { items = []; pending = {}; lists = []; }
   storeSession(r);
   store.set("tb_items", items); store.set("tb_pending", pending);
 }
 function logoutLocal() {
   session = null; items = []; pending = {};
-  ["tb_session", "tb_items", "tb_pending", "tb_last_sync"].forEach(store.del);
+  ["tb_session", "tb_items", "tb_pending", "tb_last_sync", "tb_lists", "tb_view"].forEach(store.del);
+  lists = []; view = "all";
   show();
 }
 
@@ -357,6 +400,8 @@ function logoutLocal() {
 async function flushPending() {
   const rows = Object.values(pending);
   if (!rows.length) return;
+  const dl = defaultListId();
+  rows.forEach((r) => { if (!r.list_id && dl) r.list_id = dl; });
   for (let i = 0; i < rows.length; i += 200) {
     await http("POST", "/rest/v1/todos?on_conflict=id", rows.slice(i, i + 200),
                { Prefer: "resolution=merge-duplicates,return=minimal" });
@@ -370,6 +415,7 @@ async function sync(manual = false) {
   if (!session || syncing) return;
   syncing = true; $("syncBtn").classList.add("spin"); setStatus("同步中…");
   try {
+    await loadLists();
     await flushPending();
     const rows = await http("GET", "/rest/v1/todos?select=*&deleted=eq.false&order=due_date.asc,due_time.asc&limit=5000");
     items = rows;
@@ -415,6 +461,7 @@ function toRow(it) {
     remind_min: it.remind_min === "" || it.remind_min === undefined ? null : it.remind_min,
     note: it.note || "", created_at: it.created_at || nowIso(), done_at: it.done_at || null,
     updated_at: nowIso(), deleted: !!it.deleted,
+    list_id: it.list_id || defaultListId(), assignee: it.assignee || null,
   };
 }
 function save(it, quiet = false) {
@@ -438,7 +485,7 @@ function show() {
   if (session) { render(); setStatus(); }
 }
 function sorted(col) {
-  const list = items.filter((it) => it.col === col && !it.deleted);
+  const list = items.filter((it) => it.col === col && !it.deleted && inView(it));
   if (col === "done") return list.sort((a, b) => String(b.done_at || "").localeCompare(String(a.done_at || ""))).slice(0, 200);
   return list.sort((a, b) =>
     ((a.due_date ? 0 : 1) - (b.due_date ? 0 : 1)) ||
@@ -449,8 +496,10 @@ function sorted(col) {
 function render() {
   const d = new Date();
   $("today").textContent = `${d.getMonth() + 1}/${d.getDate()}（${WEEK[d.getDay()]}）`;
+  $("views").innerHTML = lists.length ? [["all", "全部"], ...lists.map((l) => [l.id, `${l.icon} ${l.name}${(l.members || []).length > 1 ? " 👥" : ""}`])]
+    .map(([id, lab]) => `<button class="view ${id === view ? "on" : ""}" data-view="${esc(id)}">${esc(lab)}</button>`).join("") : "";
   document.querySelectorAll(".tab").forEach((t) => {
-    const c = t.dataset.col, n = items.filter((it) => it.col === c && !it.deleted).length;
+    const c = t.dataset.col, n = items.filter((it) => it.col === c && !it.deleted && inView(it)).length;
     t.textContent = `${COLS[c]}（${n}）`; t.classList.toggle("on", c === curCol);
   });
   $("legend").innerHTML = curCol === "done" ? "" :
@@ -465,9 +514,12 @@ function render() {
     if (it.col === "done" && it.done_at) { const dd = new Date(it.done_at); meta = `${dd.getMonth() + 1}/${dd.getDate()} 完成`; }
     if (it.note) meta += (meta ? "　" : "") + "📝 " + it.note.split("\n")[0].slice(0, 30);
     const actIcon = it.col === "done" ? "↩" : "✔";
+    const l = listById(it.list_id);
+    const icon = view === "all" && lists.length > 1 && l ? l.icon + " " : "";
+    const who = it.assignee ? `　→${nickOf(it.list_id, it.assignee)}` : "";
     return `<div class="card ${st} ${pending[it.id] ? "pending" : ""}" data-id="${esc(it.id)}">
       <div class="bar"></div>
-      <div class="body"><div class="ttl">${esc(it.title)}</div>${meta ? `<div class="meta">${esc(meta)}</div>` : `<div class="meta"></div>`}</div>
+      <div class="body"><div class="ttl">${esc(icon + it.title + who)}</div>${meta ? `<div class="meta">${esc(meta)}</div>` : `<div class="meta"></div>`}</div>
       <button class="act" data-act="${esc(it.id)}" aria-label="${it.col === "done" ? "重新開啟" : "完成"}">${actIcon}</button>
     </div>`;
   }).join("");
@@ -482,8 +534,21 @@ function updateHint() {
   $("edHint").textContent = t ? `到期前依「提前提醒」通知一次，到期時再通知一次。`
                               : `沒填時間時，當天 ${settings.date_only_remind_time || "09:00"} 提醒。`;
 }
+function fillWho(listId, cur) {
+  const l = listById(listId), ms = (l && l.members) || [];
+  $("edWho").innerHTML = `<option value="">全部成員</option>` +
+    ms.map((m) => `<option value="${esc(m.user_id)}">${esc(m.is_me ? "我" : m.nickname)}</option>`).join("");
+  $("edWho").value = cur && ms.some((m) => m.user_id === cur) ? cur : "";
+  $("edWho").disabled = ms.length < 2;
+}
 function openEditor(it) {
   editing = it;
+  $("edListRow").classList.toggle("hidden", !lists.length);
+  $("edList").innerHTML = lists.map((l) => `<option value="${esc(l.id)}">${esc(l.icon + " " + l.name)}</option>`).join("");
+  const lastList = store.get("tb_last_list", "");
+  $("edList").value = it && listById(it.list_id) ? it.list_id
+    : (view !== "all" ? view : (listById(lastList) ? lastList : defaultListId() || ""));
+  fillWho($("edList").value, it ? it.assignee : null);
   $("edTitle").textContent = it ? "編輯項目" : "新增項目";
   $("edName").value = it ? it.title : "";
   setSeg(it ? it.col : curCol);
@@ -511,8 +576,10 @@ function saveEditor() {
   if (col === "upcoming" && date && date <= t) col = "todo";
   const base = editing ? { ...editing } : { id: uid(), created_at: nowIso() };
   const remRaw = $("edRem").value;
+  const listId = $("edList").value || (editing && editing.list_id) || defaultListId();
   const it = { ...base, title, col, due_date: date, due_time: time, note: $("edNote").value.trim(),
-               remind_min: remRaw === "" ? null : Number(remRaw) };
+               remind_min: remRaw === "" ? null : Number(remRaw), list_id: listId, assignee: $("edWho").value || null };
+  if (listId) store.set("tb_last_list", listId);
   if (!editing || editing.col !== col) it.done_at = col === "done" ? nowIso() : null;
   save(it);
   if (!editing && col !== curCol) toast(`已新增到「${COLS[col]}」`);
@@ -531,6 +598,8 @@ function openSettings() {
   $("stSumOn").checked = s.daily_summary_enabled !== false;
   $("stSumT").value = s.daily_summary_time || "08:30";
   $("stSoon").value = s.soon_days ?? 3;
+  $("stNick").value = s.nickname || "";
+  drawLists();
   $("setMask").classList.remove("hidden");
 }
 async function saveSettings() {
@@ -540,11 +609,39 @@ async function saveSettings() {
     date_only_remind_time: $("stDayT").value || "09:00",
     daily_summary_enabled: $("stSumOn").checked, daily_summary_time: $("stSumT").value || "08:30",
     soon_days: Math.max(1, parseInt($("stSoon").value || "3", 10)), updated_at: nowIso(),
+    nickname: $("stNick").value.trim(),
   };
   await http("POST", "/rest/v1/user_settings?on_conflict=user_id", d, { Prefer: "resolution=merge-duplicates,return=minimal" });
   settings = { ...settings, ...d }; store.set("tb_settings", settings);
   render();
 }
+function drawLists() {
+  $("stLists").innerHTML = lists.map((l) => {
+    const names = (l.members || []).map((m) => m.is_me ? "我" : m.nickname).join("、");
+    const mine = l.owner === session.uid;
+    return `<div class="lrow"><span class="ln">${esc(l.icon + " " + l.name)}</span><span class="lm">成員：${esc(names)}</span>
+      ${mine ? `<button class="sbtn" data-invite="${esc(l.id)}">邀請</button>` : `<span class="lm" style="flex:0">共用</span>`}</div>`;
+  }).join("") || `<div class="hint">同步後會顯示你的清單</div>`;
+}
+$("stLists").onclick = async (e) => {
+  const b = e.target.closest("[data-invite]"); if (!b) return;
+  const l = listById(b.dataset.invite);
+  const email = prompt(`要邀請誰加入「${l.icon} ${l.name}」？\n請輸入對方登入用的 Email：`);
+  if (!email) return;
+  try {
+    const r = await http("POST", "/rest/v1/rpc/add_list_member", { p_list: l.id, p_email: email.trim() });
+    toast(r === "ok" ? "已加入 ✅ 對方同步後就會看到" : r, 4000);
+    await loadLists(); drawLists(); render();
+  } catch (err) { toast("邀請失敗：" + err.message, 4000); }
+};
+$("nlBtn").onclick = async () => {
+  const name = $("nlName").value.trim(), icon = $("nlIcon").value.trim() || "📋";
+  if (!name) { toast("請輸入清單名稱"); return; }
+  try {
+    await http("POST", "/rest/v1/rpc/create_list", { p_name: name, p_icon: icon });
+    $("nlName").value = ""; await loadLists(); drawLists(); render(); toast("已新增清單 ✅");
+  } catch (err) { toast("新增失敗：" + err.message, 4000); }
+};
 async function testTelegram() {
   await saveSettings();
   if (!settings.tg_enabled) { toast("已儲存。Telegram 尚未啟用"); return; }
@@ -574,6 +671,11 @@ $("syncBtn").onclick = () => sync(true);
 $("addBtn").onclick = () => openEditor(null);
 $("setBtn").onclick = openSettings;
 document.querySelectorAll(".tab").forEach((t) => t.onclick = () => { curCol = t.dataset.col; render(); window.scrollTo(0, 0); });
+$("views").onclick = (e) => {
+  const b = e.target.closest("[data-view]"); if (!b) return;
+  view = b.dataset.view; store.set("tb_view", view); render(); window.scrollTo(0, 0);
+};
+$("edList").onchange = () => fillWho($("edList").value, null);
 $("list").onclick = (e) => {
   const act = e.target.closest("[data-act]");
   if (act) {
